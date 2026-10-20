@@ -1,18 +1,13 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
+import { Stack } from "expo-router";
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import AppTabs from '@/components/app-tabs';
-
-SplashScreen.preventAutoHideAsync();
-
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
+// Root navigator. Every file in src/app is a screen; this Stack pushes them
+// on top of each other like browser history.
+export default function RootLayout() {
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <AnimatedSplashOverlay />
-      <AppTabs />
-    </ThemeProvider>
+    <Stack>
+      <Stack.Screen name="index" options={{ title: "Supabase RN Auth Lab" }} />
+      <Stack.Screen name="refresh" options={{ title: "#2767 Refresh cooldown" }} />
+      <Stack.Screen name="realtime" options={{ title: "#1730 Realtime + RLS" }} />
+    </Stack>
   );
 }

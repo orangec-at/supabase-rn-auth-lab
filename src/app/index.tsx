@@ -1,98 +1,68 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Link, router, useLocalSearchParams } from "expo-router";
+import { useEffect, useState } from "react";
+import { StyleSheet, Text, View } from "react-native";
+import { Button } from "@/components/button";
+import { LogView } from "@/components/log-view";
+import { log } from "@/lib/log";
+import { environment, supabase, TEST_USER, tokenExp } from "@/lib/supabase";
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+export default function Home() {
+  const { action, t, next } = useLocalSearchParams<{ action?: string; t?: string; next?: string }>();
+  const [email, setEmail] = useState<string | null>(null);
+  const [exp, setExp] = useState("none");
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
+  useEffect(() => {
+    log("app", `env ${JSON.stringify(environment())}`);
+    const { data } = supabase.auth.onAuthStateChange((_e, s) => {
+      setEmail(s?.user.email ?? null);
+      setExp(tokenExp(s?.access_token));
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
+
+  async function signIn() {
+    // signUp fails harmlessly if the user already exists.
+    await supabase.auth.signUp(TEST_USER);
+    const { error } = await supabase.auth.signInWithPassword(TEST_USER);
+    log("result", error ? `sign-in failed: ${error.message}` : "signed in");
   }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+
+  // Cold-start a scenario: ?next=<route> is saved, then the next launch jumps
+  // straight there, while the session is still being restored from storage.
+  useEffect(() => {
+    if (next) {
+      AsyncStorage.setItem("lab:next", next);
+      log("app", `next launch opens ${next}`);
+      return;
+    }
+    AsyncStorage.getItem("lab:next").then((route) => {
+      if (!route) return;
+      AsyncStorage.removeItem("lab:next");
+      router.replace(route as any);
+    });
+  }, [next]);
+
+  // Deep links drive the app from the terminal: ...--/?action=signin&t=1
+  useEffect(() => {
+    if (action === "signin") signIn();
+    if (action === "signout") supabase.auth.signOut();
+  }, [action, t]);
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
-
-export default function HomeScreen() {
-  return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+    <View style={styles.page}>
+      <Text style={styles.status}>{email ? `${email} · token expires ${exp}` : "signed out"}</Text>
+      <Button title="Sign in test user" onPress={signIn} />
+      <Button title="Sign out" onPress={() => supabase.auth.signOut()} />
+      <Link href="/refresh" style={styles.link}>→ #2767 refresh cooldown after offline</Link>
+      <Link href="/realtime" style={styles.link}>→ #1730 realtime + RLS after restored session</Link>
+      <LogView />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
-  },
+  page: { flex: 1, padding: 16 },
+  status: { fontSize: 13, color: "#444" },
+  link: { marginTop: 14, color: "#1d4ed8", fontSize: 15 },
 });
