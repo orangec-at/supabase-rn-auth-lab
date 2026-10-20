@@ -20,7 +20,9 @@ Raw logs: [`results/2026-10-20-ios.md`](results/2026-10-20-ios.md).
 | #1730 workaround | Same, plus `realtime.setAuth(session.access_token)` in `onAuthStateChange` | **Still fails 3/3.** The workaround from the issue does not help on 2.118.0 |
 | #1730 + [PR #2655](https://github.com/supabase/supabase-js/pull/2655) | PR diff applied on the v2.118.0 source, `realtime-js` rebuilt, `dist` swapped into the app | **Fixed 3/3** (`fresh-client`). `fresh-client-workaround` and `naive` still pass. Swapping the original `dist` back: fails again 2/2 |
 | #1730 control | Subscribe after the session is already loaded | Passes 7/7 (`naive` ×5, `after-session` ×1, `workaround` ×1) |
-| [#2767](https://github.com/supabase/supabase-js/issues/2767) | Refresh fails offline, network returns | **Reproduced.** Offline: 8 `/token` attempts over 25.6 s. Online: `refreshSession()` and `startAutoRefresh()` send **0** requests. First successful refresh 56.3 s after the network came back |
+| [#2767](https://github.com/supabase/supabase-js/issues/2767) | Stored session expired, refresh fails offline (8 `/token` attempts over 25.5 s), network returns | **Reproduced.** Online `refreshSession()` and `startAutoRefresh()` send **0** requests; recovery only when the 60 s cooldown ends (62.2 s after the network came back) |
+| #2767 + [PR #2769](https://github.com/supabase/supabase-js/pull/2769), variant A | Same as above | **Fixed:** `startAutoRefresh()` sends 1 request, refreshed 2.2 s after the network came back |
+| #2767 + PR #2769, variant B | App returns to the foreground **while still offline** (`startAutoRefresh()`), network returns later, app calls `startAutoRefresh()` again | **Slower than without the PR: 57.4 s vs 32.2 s.** The offline call spends the one recovery attempt, its retries fail and restart the cooldown, and the online call is rate-limited |
 | [#2613](https://github.com/supabase/supabase-js/issues/2613) | phoenix `visibilitychange` reconnect without re-auth | **Not applicable to React Native.** phoenix registers that listener only if `window.addEventListener` exists; the app logs `typeof window.addEventListener === "undefined"` on Hermes |
 
 Not yet exercised: the RN analog of #2613 (AppState background longer than the JWT
@@ -31,6 +33,14 @@ Notes:
 - #1730's `fresh-client` mode matters. If the screen subscribes after the app-wide
   client has already restored its session, the bug does not show. A real app's first
   screen subscribes during that window.
+- The #2767 test marks the stored session as expired first (as in the issue: an app
+  relaunched after its access token ran out). Without that, the auto-refresh ticker
+  has nothing to refresh, so a "0 requests" result would prove nothing. The first
+  #2767 run in the raw log did not do this; its `refreshSession()` result stands, its
+  `startAutoRefresh()` result does not.
+- Variant B's 57.4 s is the case where the network returns after the foreground
+  call's retry loop has already given up. If it returns during that loop, the next
+  backoff step (≤ 12.8 s) recovers.
 - The #2767 offline state is simulated in `fetch` (it throws `TypeError("Network
   request failed")`, what RN's fetch throws offline). For a real outage, stop the
   auth container and drive refreshes with `?action=refresh`.
@@ -54,7 +64,7 @@ Driving it from the terminal:
 ```sh
 xcrun simctl openurl booted "exp://$(ipconfig getifaddr en0):8081/--/?action=signin&t=1"
 scripts/cold-start.sh "/realtime?mode=fresh-client&auto=1"    # #1730
-xcrun simctl openurl booted "exp://$(ipconfig getifaddr en0):8081/--/refresh?auto=1"   # #2767
+xcrun simctl openurl booted "exp://$(ipconfig getifaddr en0):8081/--/refresh?auto=a"   # #2767 (variant a or b)
 ```
 
 `supabase/config.toml` sets `jwt_expiry = 300` and moves ports to 544xx so it can run
